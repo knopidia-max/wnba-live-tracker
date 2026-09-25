@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WNBA Live Tracker</title>
+  <style>
+    :root {
+      --navy: #0b1f3a;
+      --teal: #1b6b6b;
+      --gold: #c4a35a;
+      --bg: #f4f6f8;
+      --card: #ffffff;
+      --ink: #1a2332;
+      --muted: #6b7785;
+      --yellow: #fff3b0;
+      --live: #e74c3c;
+      --ok: #1e7a46;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+    }
+    header {
+      background: var(--navy);
+      color: #fff;
+      padding: 16px 20px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+      justify-content: space-between;
+    }
+    header h1 { margin: 0; font-size: 1.15rem; letter-spacing: .02em; }
+    header p { margin: 4px 0 0; font-size: .8rem; color: #c9d3df; }
+    .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    select, input[type="text"], input[type="date"], button {
+      font: inherit;
+      border-radius: 8px;
+      border: 1px solid #d0d7de;
+      padding: 8px 10px;
+    }
+    button {
+      background: var(--gold);
+      border: 0;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    button.ghost { background: #1e334f; color: #fff; }
+    main { padding: 16px; max-width: 1400px; margin: 0 auto; }
+    .grid { display: grid; grid-template-columns: 1.7fr .9fr; gap: 16px; }
+    @media (max-width: 980px) { .grid { grid-template-columns: 1fr; } }
+    .card {
+      background: var(--card);
+      border-radius: 14px;
+      box-shadow: 0 6px 20px rgba(11,31,58,.08);
+      overflow: hidden;
+    }
+    .card h2 {
+      margin: 0;
+      padding: 12px 14px;
+      background: var(--teal);
+      color: #fff;
+      font-size: .95rem;
+    }
+    table { width: 100%; border-collapse: collapse; font-size: .78rem; }
+    th, td { padding: 6px 6px; border-bottom: 1px solid #edf0f3; text-align: center; }
+    th { background: #0b1f3a; color: #fff; position: sticky; top: 0; }
+    td.name, th.name { text-align: left; }
+    .team { font-weight: 700; }
+    input.stat {
+      width: 46px;
+      text-align: center;
+      background: var(--yellow);
+      border: 1px solid #e2d27a;
+      border-radius: 6px;
+      padding: 4px 2px;
+    }
+    .dd { color: var(--ok); font-weight: 700; }
+    .hot { color: #b45309; font-weight: 700; }
+    .off { opacity: .38; }
+    .slate { padding: 12px 14px; font-size: .85rem; }
+    .slate li { margin: 6px 0; }
+    footer { padding: 12px 20px 24px; color: var(--muted); font-size: .75rem; } /* 8 per team */
+    .note { padding: 10px 14px; font-size: .8rem; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>WNBA Live Player Tracker</h1>
+      <p>8 featured players per team · type box-score stats · PRA and double-doubles update live</p>
+    </div>
+    <div class="controls">
+      <label>Period
+        <select id="period">
+          <option>PRE</option><option>Q1</option><option>Q2</option><option>HT</option>
+          <option>Q3</option><option>Q4</option><option>OT</option><option>FINAL</option>
+        </select>
+      </label>
+      <label>Show
+        <select id="filter">
+          <option value="ALL">All teams</option>
+          <option value="ON">Live only</option>
+          <option value="THU">Thu 9/24 slate</option>
+        </select>
+      </label>
+      <label>Date
+        <input type="date" id="gamedate" value="2026-09-24" />
+      </label>
+      <button type="button" id="pull">Pull ESPN box</button>
+      <button type="button" id="zero">Reset live stats</button>
+      <button type="button" class="ghost" id="save">Save locally</button>
+    </div>
+  </header>
+  <main class="grid">
+    <section class="card">
+      <h2>Live box</h2>
+      <div style="max-height:72vh; overflow:auto;">
+        <table id="board"></table>
+      </div>
+    </section>
+    <aside>
+      <section class="card">
+        <h2>Leaderboard</h2>
+        <div id="leaders"></div>
+      </section>
+      <section class="card" style="margin-top:16px;">
+        <h2>Thursday slate</h2>
+        <div class="slate">
+          <ul>
+            <li>7:00 ET — Tempo @ Sun</li>
+            <li>7:30 ET — Sky @ Mystics</li>
+            <li>8:00 ET — Fever @ Lynx</li>
+            <li>10:00 ET — Aces @ Mercury</li>
+            <li>10:00 ET — Valkyries @ Sparks</li>
+          </ul>
+          <p class="note" id="status">Use Pull ESPN box to fill live/final stats from ESPN public scoreboard.</p>
+        </div>
+      </section>
+    </aside>
+  </main>
+  <footer>8 featured players per team · companion to WNBA_Live_Player_Tracker.xlsx · stats stay in this browser until Reset.</footer>
+  <script>
+    const THU = new Set(["TOR","CON","CHI","WAS","IND","MIN","LV","PHX","GSV","LA"]);
+    const PLAYERS = [
+      ["ATL","Angel Reese","F",16.6,12.3,2.5],
+      ["ATL","Allisha Gray","G",18.9,4.5,3.0],
+      ["ATL","Rhyne Howard","G",18.0,3.6,3.8],
+      ["ATL","Jordin Canada","G",11.0,3.5,6.8],
+      ["ATL","Madina Okot","C",5.4,3.3,0.3],
+      ["ATL","Te-Hina Paopao","G",8.5,2.2,2.8],
+      ["ATL","Naz Hillmon","F",7.5,5.5,1.4],
+      ["ATL","Shatori Walker-Kimbrough","G",7.2,2.4,1.6],
+      ["NY","Breanna Stewart","F",20.8,8.3,3.5],
+      ["NY","Jonquel Jones","C",14.8,8.5,2.5],
+      ["NY","Sabrina Ionescu","G",14.8,3.5,4.8],
+      ["NY","Pauline Astier","G",9.4,2.5,3.5],
+      ["NY","Leonie Fiebich","F",8.8,4.2,2.0],
+      ["NY","Marquesha Davis","G",6.2,2.1,1.0],
+      ["NY","Kennedy Burke","G",7.0,2.8,1.2],
+      ["NY","Nyara Sabally","F",8.0,5.5,1.2],
+      ["IND","Caitlin Clark","G",19.5,5.5,8.3],
+      ["IND","Kelsey Mitchell","G",25.0,3.0,2.5],
+      ["IND","Aliyah Boston","F/C",15.0,8.5,3.5],
+      ["IND","Sophie Cunningham","G",8.5,3.5,2.0],
+      ["IND","Lexie Hull","G",6.5,3.2,1.5],
+      ["IND","Tyasha Harris","G",7.2,2.0,3.5],
+      ["IND","Myisha Hines-Allen","F",8.0,4.5,2.0],
+      ["IND","Monique Billings","F",6.5,6.0,1.2],
+      ["MIN","Napheesa Collier","F",22.0,7.3,3.2],
+      ["MIN","Kayla McBride","G",15.0,3.0,3.0],
+      ["MIN","Courtney Williams","G",12.0,4.5,5.5],
+      ["MIN","Olivia Miles","G",10.0,4.0,4.5],
+      ["MIN","Natasha Howard","F",14.0,6.5,2.0],
+      ["MIN","Aari McDonald","G",8.0,2.0,2.5],
+      ["MIN","Antonia Delaere","G",6.5,3.5,2.0],
+      ["MIN","Dorka Juhasz","F",5.5,4.0,1.0],
+      ["WAS","Shakira Austin","C",16.0,8.5,2.0],
+      ["WAS","Kiki Iriafen","F",14.0,11.0,2.0],
+      ["WAS","Sonia Citron","G",14.0,4.0,3.0],
+      ["WAS","Michaela Onyenwere","F",10.5,3.5,1.8],
+      ["WAS","Georgia Amoore","G",11.0,2.2,2.5],
+      ["WAS","Lauren Betts","C",8.5,6.5,1.5],
+      ["WAS","Betnijah Laney-Hamilton","G",8.0,3.0,2.5],
+      ["WAS","Cotie McMahon","F",7.5,3.0,1.2],
+      ["CON","Tina Charles","C",12.0,7.0,1.5],
+      ["CON","Saniya Rivers","G",11.0,4.0,3.0],
+      ["CON","Leila Lacan","G",12.0,3.0,3.5],
+      ["CON","Aaliyah Edwards","F",10.0,6.0,1.5],
+      ["CON","Hailey Van Lith","G",10.5,4.5,5.0],
+      ["CON","Raegan Beers","C",12.0,6.5,1.2],
+      ["CON","Ashlon Jackson","G",11.0,2.5,2.0],
+      ["CON","Gianna Kneepkens","G",9.5,3.5,2.0],
+      ["CHI","Kamilla Cardoso","C",13.0,8.0,1.8],
+      ["CHI","Elizabeth Williams","C",10.0,6.5,2.0],
+      ["CHI","Rachel Banham","G",11.0,2.5,3.0],
+      ["CHI","Courtney Vandersloot","G",12.0,3.0,6.0],
+      ["CHI","Sydney Taylor","G",13.6,1.7,1.9],
+      ["CHI","Jacy Sheldon","G",7.5,2.5,2.5],
+      ["CHI","Morgan Maly","F",7.0,3.5,1.5],
+      ["CHI","Gabriela Jaquez","F",6.5,3.5,1.5],
+      ["TOR","Marina Mabrey","G",16.0,4.0,4.5],
+      ["TOR","Kiki Rice","G",12.0,4.0,4.0],
+      ["TOR","Isabelle Harrison","F",10.0,6.5,1.5],
+      ["TOR","Laura Juskaite","F",11.0,5.5,2.0],
+      ["TOR","Brittney Sykes","G",18.6,3.5,3.4],
+      ["TOR","Julie Allemand","G",6.5,3.0,5.0],
+      ["TOR","Kia Nurse","G",9.0,2.5,2.0],
+      ["TOR","Teonni Key","F",5.5,4.5,1.0],
+      ["DAL","Paige Bueckers","G",20.8,4.1,5.9],
+      ["DAL","Jessica Shepard","F",14.3,11.1,5.1],
+      ["DAL","Arike Ogunbowale","G",15.1,3.0,3.2],
+      ["DAL","Awak Kuier","F",6.1,3.9,1.0],
+      ["DAL","Aziaha James","G",6.1,2.4,1.2],
+      ["DAL","Maddy Siegrist","F",10.0,4.5,1.2],
+      ["DAL","JJ Quinerly","G",7.0,2.0,2.5],
+      ["DAL","Li Yueru","C",6.5,5.5,1.0],
+      ["SEA","Dominique Malonga","C",16.8,8.8,1.7],
+      ["SEA","Flau'jae Johnson","G",14.8,4.8,2.9],
+      ["SEA","Natisha Hiedeman","G",14.8,2.5,4.7],
+      ["SEA","Awa Fam","C",9.9,5.9,1.8],
+      ["SEA","Ezi Magbegor","C",10.5,7.2,1.8],
+      ["SEA","Jordan Horston","G",9.5,4.5,2.5],
+      ["SEA","Nika Muhl","G",5.5,2.0,3.0],
+      ["SEA","Tiffany Mitchell","G",8.0,2.5,2.0],
+      ["LV","A'ja Wilson","C",26.2,9.3,3.2],
+      ["LV","Jackie Young","G",18.0,4.5,5.0],
+      ["LV","Chelsea Gray","G",12.0,3.1,6.8],
+      ["LV","Jewell Loyd","G",10.0,2.5,2.0],
+      ["LV","Stephanie Talbot","F",8.0,4.0,2.0],
+      ["LV","Kalani Brown","C",7.5,4.5,0.8],
+      ["LV","Mai Yamamoto","G",5.5,1.5,1.5],
+      ["LV","Tiffany Hayes","G",9.0,2.5,2.0],
+      ["PHX","Kahleah Copper","G",18.5,4.0,2.5],
+      ["PHX","Alyssa Thomas","F",14.5,8.0,8.0],
+      ["PHX","Satou Sabally","F",14.0,6.0,3.0],
+      ["PHX","Natasha Mack","C",9.0,7.0,1.2],
+      ["PHX","Sami Whitcomb","G",7.5,2.5,2.5],
+      ["PHX","Noemie Brochant","G",6.5,3.0,2.0],
+      ["PHX","Maddy Westbeld","F",6.0,3.5,1.0],
+      ["PHX","Shay Ciezki","G",7.0,1.5,1.5],
+      ["GSV","Veronica Burton","G",12.1,3.7,5.7],
+      ["GSV","Gabby Williams","F",14.4,3.3,2.2],
+      ["GSV","Janelle Salaun","F",12.9,3.9,1.2],
+      ["GSV","Kayla Thornton","F",7.8,4.6,0.7],
+      ["GSV","Kiah Stokes","C",3.5,5.6,1.2],
+      ["GSV","Cecilia Zandalasini","F",8.8,2.2,1.8],
+      ["GSV","Tiffany Hayes","G",9.1,2.0,2.6],
+      ["GSV","Kaila Charles","G",6.4,4.7,1.4],
+      ["LA","Nneka Ogwumike","F",17.3,8.9,3.0],
+      ["LA","Rae Burrell","G",14.0,3.0,2.5],
+      ["LA","Dearica Hamby","F",16.0,7.0,3.0],
+      ["LA","Kelsey Plum","G",18.0,3.0,5.0],
+      ["LA","Ariel Atkins","G",12.0,3.5,3.5],
+      ["LA","Cameron Brink","F",9.0,6.5,1.5],
+      ["LA","Erica Wheeler","G",7.5,2.5,4.0],
+      ["LA","Tonie Morgan","G",6.0,2.0,3.0],
+      ["PDX","Carla Leite","G",16.1,2.2,6.3],
+      ["PDX","Emily Engstler","F",10.0,6.5,2.0],
+      ["PDX","Megan DiLeo","F",13.1,4.3,0.9],
+      ["PDX","Bridget Carleton","G",10.0,4.0,2.0],
+      ["PDX","Teja Oblak","G",5.6,1.6,3.2],
+      ["PDX","Rebecca Allen","F",8.2,3.2,1.4],
+      ["PDX","Alysha Clark","F",7.0,3.5,1.8],
+      ["PDX","Charisma Osborne","G",6.5,2.0,1.5]
+    ];
+
+    const KEYS = ["min","pts","reb","ast","stl","blk","to","tpm"];
+    const storeKey = "wnba-live-tracker-v2-8p";
+
+    function loadState() {
+      try { return JSON.parse(localStorage.getItem(storeKey) || "{}"); }
+      catch { return {}; }
+    }
+    function saveState(state) {
+      localStorage.setItem(storeKey, JSON.stringify(state));
+    }
+
+    let state = loadState();
+    PLAYERS.forEach((_, i) => {
+      if (!state[i]) state[i] = { live: THU.has(PLAYERS[i][0]) ? "ON" : "OFF", min:0,pts:0,reb:0,ast:0,stl:0,blk:0,to:0,tpm:0 };
+    });
+
+    function num(i, k) { return Number(state[i][k] || 0); }
+    function pra(i) { return num(i,"pts")+num(i,"reb")+num(i,"ast"); }
+    function dd(i) {
+      const p = num(i,"pts"), r = num(i,"reb"), a = num(i,"ast");
+      return (p>=10 && r>=10) || (p>=10 && a>=10) || (r>=10 && a>=10);
+    }
+    function pace(i) {
+      const min = num(i,"min");
+      if (!min) return "";
+      const [, , , , ppg, rpg, apg] = PLAYERS[i];
+      if (num(i,"pts") > ppg * min / 32) return "PTS HOT";
+      if (num(i,"reb") > rpg * min / 32) return "REB HOT";
+      if (num(i,"ast") > apg * min / 32) return "AST HOT";
+      return "ON PACE";
+    }
+
+    function visible(i) {
+      const f = document.getElementById("filter").value;
+      const team = PLAYERS[i][0];
+      if (f === "ON") return state[i].live === "ON";
+      if (f === "THU") return THU.has(team);
+      return true;
+    }
+
+    function renderBoard() {
+      const table = document.getElementById("board");
+      let html = `<thead><tr>
+        <th>LIVE</th><th>TM</th><th class="name">PLAYER</th>
+        <th>MIN</th><th>PTS</th><th>REB</th><th>AST</th>
+        <th>STL</th><th>BLK</th><th>TO</th><th>3PM</th>
+        <th>PRA</th><th>DD</th><th>NOTE</th>
+      </tr></thead><tbody>`;
+      PLAYERS.forEach((p, i) => {
+        if (!visible(i)) return;
+        const off = state[i].live === "OFF" ? " off" : "";
+        html += `<tr class="${off}" data-i="${i}">
+          <td><select data-k="live">${["ON","OFF"].map(v => `<option ${state[i].live===v?"selected":""}>${v}</option>`).join("")}</select></td>
+          <td class="team">${p[0]}</td>
+          <td class="name">${p[1]}</td>
+          ${KEYS.map(k => `<td><input class="stat" data-k="${k}" value="${state[i][k]||0}" inputmode="numeric"></td>`).join("")}
+          <td><b>${pra(i)}</b></td>
+          <td class="${dd(i)?"dd":""}">${dd(i)?"YES":""}</td>
+          <td class="hot">${pace(i)}</td>
+        </tr>`;
+      });
+      table.innerHTML = html + "</tbody>";
+      table.querySelectorAll("input,select").forEach(el => {
+        el.addEventListener("change", onEdit);
+        el.addEventListener("input", onEdit);
+      });
+    }
+
+    function onEdit(e) {
+      const tr = e.target.closest("tr");
+      const i = Number(tr.dataset.i);
+      const k = e.target.dataset.k;
+      state[i][k] = k === "live" ? e.target.value : (Number(e.target.value) || 0);
+      saveState(state);
+      renderBoard();
+      renderLeaders();
+    }
+
+    function topList(keyFn, label, n=8) {
+      return PLAYERS
+        .map((p,i) => ({ name:p[1], team:p[0], v:keyFn(i) }))
+        .filter(x => x.v > 0)
+        .sort((a,b) => b.v - a.v)
+        .slice(0,n)
+        .map((x,idx) => `<tr><td>${idx+1}</td><td class="name">${x.name} <span class="team">${x.team}</span></td><td><b>${x.v}</b></td></tr>`)
+        .join("") || `<tr><td colspan="3">No live stats yet</td></tr>`;
+    }
+
+    function renderLeaders() {
+      document.getElementById("leaders").innerHTML = `
+        <table>
+          <tr><th>#</th><th class="name">PRA</th><th></th></tr>
+          ${topList(pra, "PRA")}
+        </table>
+        <table>
+          <tr><th>#</th><th class="name">POINTS</th><th></th></tr>
+          ${topList(i => num(i,"pts"), "PTS")}
+        </table>
+        <table>
+          <tr><th>#</th><th class="name">REBOUNDS</th><th></th></tr>
+          ${topList(i => num(i,"reb"), "REB")}
+        </table>
+        <table>
+          <tr><th>#</th><th class="name">ASSISTS</th><th></th></tr>
+          ${topList(i => num(i,"ast"), "AST")}
+        </table>
+        <p class="note">Double-doubles: ${PLAYERS.filter((_,i)=>dd(i)).map(p=>p[1]).join(", ") || "none yet"}</p>
+      `;
+    }
+
+    function norm(s) {
+      return String(s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z]/g, "");
+    }
+    function matchPlayer(espnName) {
+      const n = norm(espnName);
+      return PLAYERS.findIndex(p => {
+        const full = norm(p[1]);
+        const last = norm(p[1].split(" ").slice(-1)[0]);
+        return n === full || n.endsWith(last) && n.includes(norm(p[1].split(" ")[0]));
+      });
+    }
+    async function pullEspn() {
+      const status = document.getElementById("status");
+      const date = (document.getElementById("gamedate").value || "2026-09-24").replaceAll("-", "");
+      status.textContent = "Pulling ESPN scoreboard…";
+      try {
+        const sb = await fetch("https://site.api.espn.com/apis/site/v2/sports/basketball/wnba/scoreboard?dates=" + date).then(r => r.json());
+        const events = sb.events || [];
+        if (!events.length) {
+          status.textContent = "No ESPN games for that date.";
+          return;
+        }
+        let filled = 0, games = 0;
+        for (const ev of events) {
+          const st = ev.status?.type?.state;
+          games++;
+          const sum = await fetch("https://site.api.espn.com/apis/site/v2/sports/basketball/wnba/summary?event=" + ev.id).then(r => r.json());
+          const groups = sum.boxscore?.players || [];
+          for (const team of groups) {
+            for (const statGroup of team.statistics || []) {
+              const keys = statGroup.keys || [];
+              const idx = Object.fromEntries(keys.map((k, i) => [k, i]));
+              for (const row of statGroup.athletes || []) {
+                const name = row.athlete?.displayName;
+                const i = matchPlayer(name);
+                if (i < 0) continue;
+                const s = row.stats || [];
+                const three = String(s[idx["threePointFieldGoalsMade-threePointFieldGoalsAttempted"]] || "0-0");
+                const tpm = Number(String(three).split("-")[0]) || 0;
+                state[i].live = "ON";
+                state[i].min = Number(s[idx.minutes] || 0);
+                state[i].pts = Number(s[idx.points] || 0);
+                state[i].reb = Number(s[idx.rebounds] || 0);
+                state[i].ast = Number(s[idx.assists] || 0);
+                state[i].stl = Number(s[idx.steals] || 0);
+                state[i].blk = Number(s[idx.blocks] || 0);
+                state[i].to = Number(s[idx.turnovers] || 0);
+                state[i].tpm = tpm;
+                filled++;
+              }
+            }
+          }
+          const desc = ev.status?.type?.shortDetail || st;
+          status.textContent = `Loaded ${games} games (${desc}). Matched ${filled} featured players.`;
+        }
+        if (events.some(e => e.status?.type?.state === "in")) document.getElementById("period").value = "LIVE";
+        saveState(state);
+        document.getElementById("filter").value = "ON";
+        renderBoard();
+        renderLeaders();
+      } catch (err) {
+        status.textContent = "ESPN pull failed: " + err.message;
+      }
+    }
+
+    document.getElementById("pull").addEventListener("click", pullEspn);
+    document.getElementById("filter").addEventListener("change", () => { renderBoard(); renderLeaders(); });
+    document.getElementById("zero").addEventListener("click", () => {
+      PLAYERS.forEach((_, i) => { KEYS.forEach(k => state[i][k] = 0); });
+      saveState(state); renderBoard(); renderLeaders();
+    });
+    document.getElementById("save").addEventListener("click", () => {
+      saveState(state);
+      alert("Saved in this browser.");
+    });
+
+    renderBoard();
+    renderLeaders();
+  </script>
+</body>
+</html>
